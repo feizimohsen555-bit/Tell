@@ -1,0 +1,12 @@
+{
+  "name": "ios-adblock-doh",
+  "version": "1.0.0",
+  "description": "AdBlock DoH Server for iOS with Dynamic Profile",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
