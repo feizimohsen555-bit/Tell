@@ -1,0 +1,8 @@
+# به requirements.txt ربات اضافه کن:
+Pillow>=10.0
+arabic-reshaper>=3.0
+python-bidi>=0.4.2
+
+# اختیاری ولی پیشنهادی (خروجی دقیقاً مثل MediaInfo اصلی میشه؛ بدونش از ffprobe استفاده میشه):
+pymediainfo>=6.0
+# یا روی سرور: apt install mediainfo
