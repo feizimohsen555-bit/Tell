@@ -9,3 +9,4 @@ python-bidi
 pymediainfo>=6.0
 aiohttp
 httpx
+psycopg[binary]>=3.2.10
