@@ -28,3 +28,4 @@ curl_cffi
 # --- فارسی‌نویسی روی پوستر روزنامه (اگر libraqm نصب نباشد، این دو لازم‌اند) ---
 arabic-reshaper
 python-bidi
+orjson
