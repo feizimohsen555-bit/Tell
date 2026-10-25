@@ -24,3 +24,5 @@ tradingview-ta
 edge-tts
 ddgs
 curl_cffi
+arabic-reshaper
+python-bidi
