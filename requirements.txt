@@ -29,3 +29,4 @@ curl_cffi
 arabic-reshaper
 python-bidi
 orjson
+brotli
