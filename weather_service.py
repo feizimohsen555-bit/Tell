@@ -472,74 +472,189 @@ def _val(v, unit: str = "") -> str:
     return _ltr(_fa(_n(v)) + unit)
 
 
-def format_weather_message(city_name: str, data: dict, future: bool = False, days: int | None = None) -> str:
-    """قالب‌بندی پیام تلگرام برای زبان فارسی (راست‌چین).
-    قاعده‌ها: هر خط با RLM شروع می‌شود، هر مورد در خط جدا است تا خط‌شکنی بین چپ‌چین و راست‌چین قاطی نشود،
-    و عدد/ساعت/واحدها داخل LRM می‌آیند."""
+# ------------------------------------------------------------------
+# متن‌های قابل‌ویرایش از پنل ادمین (✏️ ویرایش پیام‌ها) — bot.py خودش این‌ها را ثبت می‌کند
+# ------------------------------------------------------------------
+_CARD_VARS_HELP = (
+    "{city} {icon} {temp} {cond} {tmax} {tmin} {feel} {wind} {wind_dir} {humidity} {uv} "
+    "{aqi_dot} {aqi_desc} {aqi} {sunrise} {sunset} {hourly_block} {forecast_block} {source} "
+    "— HTML تلگرام مجاز است — خالی = متن پیش‌فرض"
+)
+
+_CARD_DEFAULT = (
+    "📍 <b>{city}</b>\n"
+    "{icon} <b>{temp}</b> · {cond}\n"
+    "🌡 بیشینه: <b>{tmax}</b>  ┊  کمینه: <b>{tmin}</b>\n"
+    "🧥 دمای حسی: <b>{feel}</b>\n"
+    "\n"
+    "{hourly_block}\n"
+    "\n"
+    "📊 <b>جزئیات وضعیت:</b>\n"
+    "💨 باد: <b>{wind}</b> {wind_dir}\n"
+    "💧 رطوبت: <b>{humidity}</b>\n"
+    "☀️ شاخص فرابنفش: <b>{uv}</b>\n"
+    "{aqi_dot} کیفیت هوا: <b>{aqi_desc}</b> ({aqi})\n"
+    "🌅 طلوع آفتاب: <b>{sunrise}</b>\n"
+    "🌇 غروب: <b>{sunset}</b>\n"
+    "\n"
+    "{forecast_block}\n"
+    "\n"
+    "<i>{source}</i>"
+)
+
+TEXT_DEFAULTS = {
+    "weather_card": {
+        "label": "آب‌وهوا — کارت اصلی /هوا",
+        "vars": _CARD_VARS_HELP,
+        "empty": "default",
+        "default": _CARD_DEFAULT,
+    },
+    "weather_hourly_head": {
+        "label": "آب‌وهوا — تیتر پیش‌بینی ساعت‌به‌ساعت",
+        "vars": "بدون متغیر — HTML تلگرام مجاز است — خالی = متن پیش‌فرض",
+        "empty": "default",
+        "default": "🕒 <b>پیش‌بینی ساعت‌به‌ساعت:</b>",
+    },
+    "weather_forecast_head": {
+        "label": "آب‌وهوا — تیتر پیش‌بینی روزهای آینده",
+        "vars": "بدون متغیر — HTML تلگرام مجاز است — خالی = متن پیش‌فرض",
+        "empty": "default",
+        "default": "📅 <b>پیش‌بینی روزهای آینده:</b>",
+    },
+    "weather_not_found": {
+        "label": "آب‌وهوا — شهر پیدا نشد",
+        "vars": "{city} نام واردشده — خالی = متن پیش‌فرض",
+        "empty": "default",
+        "default": "❌ اطلاعات آب‌وهوا برای «{city}» پیدا نشد.",
+    },
+    "weather_no_city": {
+        "label": "آب‌وهوا — کاربر هنوز شهری ثبت نکرده",
+        "vars": "بدون متغیر — HTML تلگرام مجاز است — خالی = متن پیش‌فرض",
+        "empty": "default",
+        "default": "📍 هنوز شهری برات ثبت نشده. نام شهرت رو بعد از دستور بنویس:\nمثال: <code>/هوا شیراز</code>",
+    },
+    "weather_fetch_error": {
+        "label": "آب‌وهوا — خطا در دریافت اطلاعات",
+        "vars": "بدون متغیر — خالی = متن پیش‌فرض",
+        "empty": "default",
+        "default": "⚠️ خطایی در ارتباط با ایستگاه هواشناسی رخ داد. کمی بعد تلاش کن.",
+    },
+    "weather_change_hint": {
+        "label": "آب‌وهوا — راهنمای تغییر شهر (/هوا تغییر)",
+        "vars": "بدون متغیر — خالی = متن پیش‌فرض",
+        "empty": "default",
+        "default": "📍 شهرت رو از بخش «تنظیم پرامپت شخصی» در پیوی مشخص کن.",
+    },
+}
+
+_text_fn = None
+
+
+def set_text_provider(fn):
+    """bot.py اینجا render_text_or_default را می‌دهد تا متن‌های ویرایش‌شده از دیتابیس خوانده شوند."""
+    global _text_fn
+    _text_fn = fn
+
+
+class _SafeFmt(dict):
+    def __missing__(self, k):
+        return ""
+
+
+def _t(key: str, **kw) -> str:
+    safe = {k: ("" if v is None else v) for k, v in kw.items()}
+    if _text_fn is not None:
+        try:
+            out = _text_fn(key, **safe)
+            if out and str(out).strip():
+                return str(out)
+        except Exception as e:
+            logger.warning("[WEATHER] text provider error (%s): %s", key, e)
+    default = TEXT_DEFAULTS[key]["default"]
+    try:
+        return default.format_map(_SafeFmt(safe))
+    except Exception:
+        return default
+
+
+def _finish_card(text: str) -> str:
+    """هر خطِ غیرخالی با RLM شروع می‌شود (راست‌چین)، فاصله‌های اضافهٔ آخر خط و خط‌های خالی پشت‌سرهم تمیز می‌شوند."""
+    out = []
+    for ln in text.replace("\r\n", "\n").split("\n"):
+        ln = ln.rstrip()
+        if ln.strip() and not ln.startswith(_RLM):
+            ln = _RLM + ln
+        out.append(ln)
+    res = "\n".join(out)
+    res = re.sub(r"\n{3,}", "\n\n", res)
+    return res.strip()
+
+
+def _card_vars(city_name: str, data: dict, future: bool, days: int | None) -> dict:
     R = _RLM
-    city = html.escape(str(city_name))
-    cond = html.escape(str(data.get("condition") or "صاف"))
-    icon = data.get("icon") or "🌤"
-
-    lines = []
-    # ۱. هدر: شهر، دمای فعلی، وضعیت، بیشینه/کمینه/حسی
-    lines.append(f"{R}📍 <b>{city}</b>")
-    lines.append(f"{R}{icon} <b>{_val(data.get('temp'), '°C')}</b> · {cond}")
-    lines.append(f"{R}🌡 بیشینه: <b>{_val(data.get('tmax'), '°')}</b>  ┊  کمینه: <b>{_val(data.get('tmin'), '°')}</b>")
-    lines.append(f"{R}🧥 دمای حسی: <b>{_val(data.get('feel'), '°')}</b>")
-    lines.append("")
-
-    # ۲. پیش‌بینی ساعت‌به‌ساعت (هر دو ساعت یک‌بار؛ ردیف‌های سه‌تایی، بدون بلوک code که چپ‌چین و ناجور بود)
-    timeline = data.get("hourly_strip") or []
-    if timeline:
-        lines.append(f"{R}🕒 <b>پیش‌بینی ساعت‌به‌ساعت:</b>")
-        cells = [f"{_ltr(_fa(h['hour']))} {h['icon']} <b>{_val(h['temp'], '°')}</b>" for h in timeline[::2]]
-        for i in range(0, len(cells), 3):
-            lines.append(f"{R}" + "  ┊  ".join(cells[i:i + 3]))
-        lines.append("")
-
-    # ۳. جزئیات وضعیت — هر مورد در یک خط
     wnd = data.get("wind_speed")
-    wdir = data.get("wind_dir") or ""
     aqi_num = data.get("aqi")
     aqi_desc, aqi_dot = _aqi_status(aqi_num)
-    aqi_txt = _ltr(_fa(aqi_num)) if aqi_num is not None else "—"
-    sr = data.get("sunrise") or "—"
-    ss = data.get("sunset") or "—"
     if _FA_DIGITS_ON:
         wind_txt = f"{_fa(_n(wnd))} کیلومتر بر ساعت"
     else:
         wind_txt = _val(wnd, " km/h")
 
-    lines.append(f"{R}📊 <b>جزئیات وضعیت:</b>")
-    lines.append(f"{R}💨 باد: <b>{wind_txt}</b> {wdir}".rstrip())
-    lines.append(f"{R}💧 رطوبت: <b>{_val(data.get('humidity'), '%')}</b>")
-    lines.append(f"{R}☀️ شاخص فرابنفش: <b>{_ltr('UV ' + _fa(_n(data.get('uv'))))}</b>")
-    lines.append(f"{R}{aqi_dot} کیفیت هوا: <b>{aqi_desc}</b> ({aqi_txt})")
-    lines.append(f"{R}🌅 طلوع آفتاب: <b>{_ltr(_fa(sr))}</b>")
-    lines.append(f"{R}🌇 غروب: <b>{_ltr(_fa(ss))}</b>")
-    lines.append("")
+    # پیش‌بینی ساعت‌به‌ساعت (هر دو ساعت یک‌بار؛ ردیف‌های سه‌تایی)
+    hourly_block = ""
+    timeline = data.get("hourly_strip") or []
+    if timeline:
+        rows = [_t("weather_hourly_head")]
+        cells = [f"{_ltr(_fa(h['hour']))} {h['icon']} <b>{_val(h['temp'], '°')}</b>" for h in timeline[::2]]
+        for i in range(0, len(cells), 3):
+            rows.append(f"{R}" + "  ┊  ".join(cells[i:i + 3]))
+        hourly_block = "\n".join(rows)
 
-    # ۴. پیش‌بینی روزهای آینده — هر روز دو خط (نام روز و تاریخ / بازهٔ دما و احتمال بارش)
+    # پیش‌بینی روزهای آینده — هر روز دو خط
+    forecast_block = ""
     fc = data.get("forecast") or []
     n_days = days if days is not None else (7 if future else 3)
     if fc:
-        lines.append(f"{R}📅 <b>پیش‌بینی روزهای آینده:</b>")
+        rows = [_t("weather_forecast_head")]
         for i, d in enumerate(fc[:n_days]):
             rel, when = _day_label(i, d.get("date", ""))
             d_icon = d.get("icon") or "🌤"
             pop = d.get("pop")
             rain_txt = f"   ☔ <b>{_val(pop, '%')}</b>" if (pop and pop > 15) else ""
-            lines.append(f"{R}• <b>{html.escape(str(rel))}</b> ({_fa(html.escape(str(when)))})")
-            lines.append(
+            rows.append(f"{R}• <b>{html.escape(str(rel))}</b> ({_fa(html.escape(str(when)))})")
+            rows.append(
                 f"{R}\u2003{d_icon} <b>{_val(d.get('tmin'), '°')}</b> تا <b>{_val(d.get('tmax'), '°C')}</b>{rain_txt}"
             )
-        lines.append("")
+        forecast_block = "\n".join(rows)
 
-    # ۵. منبع (لاتین؛ داخل LRM تا پرانتزها برعکس نشوند)
-    src = html.escape(str(data.get("source") or SOURCE_NAME))
-    lines.append(f"{R}{_LRM}<i>{src}</i>{_LRM}")
-    return "\n".join(lines)
+    return {
+        "city": html.escape(str(city_name)),
+        "icon": data.get("icon") or "🌤",
+        "cond": html.escape(str(data.get("condition") or "صاف")),
+        "temp": _val(data.get("temp"), "°C"),
+        "tmax": _val(data.get("tmax"), "°"),
+        "tmin": _val(data.get("tmin"), "°"),
+        "feel": _val(data.get("feel"), "°"),
+        "wind": wind_txt,
+        "wind_dir": data.get("wind_dir") or "",
+        "humidity": _val(data.get("humidity"), "%"),
+        "uv": _ltr("UV " + _fa(_n(data.get("uv")))),
+        "aqi_dot": aqi_dot,
+        "aqi_desc": aqi_desc,
+        "aqi": _ltr(_fa(aqi_num)) if aqi_num is not None else "—",
+        "sunrise": _ltr(_fa(data.get("sunrise") or "—")),
+        "sunset": _ltr(_fa(data.get("sunset") or "—")),
+        "hourly_block": hourly_block,
+        "forecast_block": forecast_block,
+        "source": _ltr(html.escape(str(data.get("source") or SOURCE_NAME))),
+    }
+
+
+def format_weather_message(city_name: str, data: dict, future: bool = False, days: int | None = None) -> str:
+    """کارت آب‌وهوا: قالب از پنل ادمین (کلید weather_card) خوانده می‌شود و متغیرها داخلش جایگزین می‌شوند.
+    اگر قالب خالی/خراب بود، قالب پیش‌فرض استفاده می‌شود."""
+    v = _card_vars(city_name, data, future, days)
+    return _finish_card(_t("weather_card", **v))
 
 
 def format_weather_for_user(data: dict, future: bool = False) -> str:
@@ -576,11 +691,6 @@ except ValueError:
 
 WEATHER_AUTO_DELETE_PRIVATE = (os.environ.get("WEATHER_AUTO_DELETE_PRIVATE", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
 _CHANGE_WORDS = frozenset(("تغییر", "تغییر شهر", "شهر من", "شهرمن", "change", "set"))
-
-TEXT_DEFAULTS = {}
-def set_text_provider(fn):
-    pass
-
 
 def register_weather_handlers(bot, spam_check=None, get_location=None, save_location=None):
     _per_user = get_location is not None
@@ -630,7 +740,7 @@ def register_weather_handlers(bot, spam_check=None, get_location=None, save_loca
     def _show_for_query(message, city_query: str):
         w_data = fetch_weather(city_query)
         if not w_data:
-            _reply(message, f"❌ اطلاعات آب‌وهوا برای «{html.escape(city_query[:40])}» پیدا نشد.", parse_mode="HTML")
+            _reply(message, _t("weather_not_found", city=html.escape(city_query[:40])), parse_mode="HTML")
             return
         _send_weather(message, w_data)
 
@@ -647,7 +757,7 @@ def register_weather_handlers(bot, spam_check=None, get_location=None, save_loca
 
         uid = message.from_user.id
         if arg and _norm(arg) in {_norm(w) for w in _CHANGE_WORDS}:
-            _reply(message, "📍 شهرت رو از بخش «تنظیم پرامپت شخصی» در پیوی مشخص کن.", parse_mode="HTML")
+            _reply(message, _t("weather_change_hint"), parse_mode="HTML")
             return
         if arg:
             _show_for_query(message, arg)
@@ -660,11 +770,11 @@ def register_weather_handlers(bot, spam_check=None, get_location=None, save_loca
             loc = None
 
         if not loc:
-            _reply(message, "📍 هنوز شهری برات ثبت نشده. نام شهرت رو بعد از دستور بنویس:\nمثال: <code>/هوا شیراز</code>", parse_mode="HTML")
+            _reply(message, _t("weather_no_city"), parse_mode="HTML")
             return
 
         w_data = fetch_weather(loc["lat"], loc["lon"], label=loc["city"])
         if not w_data:
-            _reply(message, "⚠️ خطایی در ارتباط با ایستگاه هواشناسی رخ داد. کمی بعد تلاش کن.")
+            _reply(message, _t("weather_fetch_error"), parse_mode="HTML")
             return
         _send_weather(message, w_data)
