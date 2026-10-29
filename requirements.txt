@@ -31,4 +31,4 @@ python-bidi
 orjson
 brotli
 cryptography
-ffmpeg-python
+imageio-ffmpeg
