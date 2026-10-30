@@ -32,3 +32,5 @@ orjson
 brotli
 cryptography
 imageio-ffmpeg
+yt-dlp
+shazamio
